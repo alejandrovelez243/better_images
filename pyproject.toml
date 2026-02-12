@@ -1,0 +1,21 @@
+[project]
+name = "better-images"
+version = "1.0.0"
+description = "Local AI image processor — upscale, remove background, convert to SVG/ICO"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "flask>=3.0",
+    "rembg[cpu]>=2.0.50",
+    "vtracer>=0.6",
+    "Pillow>=10.0",
+    "realesrgan>=0.3",
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "basicsr-fixed>=1.4.2",
+    "gfpgan>=1.3",
+    "numba>=0.58.0",
+    "llvmlite>=0.41.0",
+]
+
+[project.scripts]
+better-images = "app:main"

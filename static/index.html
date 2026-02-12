@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Better Images — AI Image Processor</title>
+    <meta name="description" content="Local AI-powered image upscaling, background removal, and format conversion">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header__logo">
+            <div class="header__icon">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+            </div>
+            <h1>Better Images</h1>
+            <span class="header__badge">LOCAL AI</span>
+        </div>
+        <p class="header__subtitle">Upscale • Remove Background • Convert to SVG & ICO</p>
+    </header>
+
+    <main class="app">
+        <!-- Upload Zone -->
+        <section id="upload-section" class="upload-section">
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone__content">
+                    <div class="drop-zone__icon">
+                        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                    </div>
+                    <h2>Arrastra tu imagen aquí</h2>
+                    <p>o haz clic para seleccionar</p>
+                    <span class="drop-zone__formats">PNG • JPG • WEBP • BMP • TIFF — Máx 50MB</span>
+                </div>
+                <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" hidden>
+            </div>
+        </section>
+
+        <!-- Processing Panel (hidden until upload) -->
+        <section id="workspace" class="workspace" style="display:none;">
+            <div class="workspace__grid">
+                <!-- Preview Area -->
+                <div class="preview-panel">
+                    <div class="preview-panel__header">
+                        <h3>Vista Previa</h3>
+                        <div class="preview-panel__tabs">
+                            <button class="tab active" data-preview="original">Original</button>
+                            <button class="tab" data-preview="result" id="tab-result" style="display:none;">Resultado</button>
+                        </div>
+                    </div>
+                    <div class="preview-panel__canvas">
+                        <img id="preview-image" src="" alt="Preview">
+                        <div id="preview-placeholder" class="preview-placeholder">
+                            <p>Procesando...</p>
+                        </div>
+                    </div>
+                    <div class="preview-panel__info">
+                        <span id="info-name" class="info-tag"></span>
+                        <span id="info-dimensions" class="info-tag"></span>
+                        <span id="info-size" class="info-tag"></span>
+                    </div>
+                </div>
+
+                <!-- Options Panel -->
+                <div class="options-panel">
+                    <div class="options-card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="15 3 21 3 21 9"/>
+                                <polyline points="9 21 3 21 3 15"/>
+                                <line x1="21" y1="3" x2="14" y2="10"/>
+                                <line x1="3" y1="21" x2="10" y2="14"/>
+                            </svg>
+                            Escalado AI
+                        </h3>
+                        <p class="options-card__desc">Aumenta la resolución con Real-ESRGAN</p>
+                        <div class="scale-options">
+                            <label class="scale-option">
+                                <input type="radio" name="upscale" value="0" checked>
+                                <span class="scale-option__btn">Sin escalar</span>
+                            </label>
+                            <label class="scale-option">
+                                <input type="radio" name="upscale" value="2">
+                                <span class="scale-option__btn">×2</span>
+                            </label>
+                            <label class="scale-option">
+                                <input type="radio" name="upscale" value="4">
+                                <span class="scale-option__btn">×4</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="options-card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M5 5.5A3.5 3.5 0 0 1 8.5 2H12v7H8.5A3.5 3.5 0 0 1 5 5.5z"/>
+                                <path d="M12 2h3.5a3.5 3.5 0 1 1 0 7H12V2z"/>
+                                <path d="M12 12.5a3.5 3.5 0 1 1 7 0 3.5 3.5 0 1 1-7 0z"/>
+                                <path d="M5 19.5A3.5 3.5 0 0 1 8.5 16H12v3.5a3.5 3.5 0 1 1-7 0z"/>
+                                <path d="M5 12.5A3.5 3.5 0 0 1 8.5 9H12v7H8.5A3.5 3.5 0 0 1 5 12.5z"/>
+                            </svg>
+                            Quitar Fondo
+                        </h3>
+                        <p class="options-card__desc">Elimina el fondo con IA (U2-Net)</p>
+                        <label class="toggle">
+                            <input type="checkbox" id="remove-bg">
+                            <span class="toggle__slider"></span>
+                            <span class="toggle__label">Activar</span>
+                        </label>
+                    </div>
+
+                    <div class="options-card">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                            </svg>
+                            Formato de Salida
+                        </h3>
+                        <p class="options-card__desc">Elige el formato final</p>
+                        <div class="format-options">
+                            <label class="format-option">
+                                <input type="radio" name="format" value="png" checked>
+                                <span class="format-option__btn">
+                                    <strong>PNG</strong>
+                                    <small>Calidad máxima</small>
+                                </span>
+                            </label>
+                            <label class="format-option">
+                                <input type="radio" name="format" value="svg">
+                                <span class="format-option__btn">
+                                    <strong>SVG</strong>
+                                    <small>Vectorizado</small>
+                                </span>
+                            </label>
+                            <label class="format-option">
+                                <input type="radio" name="format" value="ico">
+                                <span class="format-option__btn">
+                                    <strong>ICO</strong>
+                                    <small>Favicon/Icono</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <button id="btn-process" class="btn btn--primary">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Procesar Imagen
+                    </button>
+
+                    <div id="progress-area" class="progress-area" style="display:none;">
+                        <div class="progress-bar">
+                            <div class="progress-bar__fill" id="progress-fill"></div>
+                        </div>
+                        <p id="progress-text" class="progress-text">Iniciando...</p>
+                    </div>
+
+                    <div id="download-area" class="download-area" style="display:none;">
+                        <button id="btn-download" class="btn btn--success">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                <polyline points="7 10 12 15 17 10"/>
+                                <line x1="12" y1="15" x2="12" y2="3"/>
+                            </svg>
+                            Descargar Resultado
+                        </button>
+                        <button id="btn-new" class="btn btn--ghost">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="1 4 1 10 7 10"/>
+                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                            </svg>
+                            Nueva Imagen
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <script src="/js/app.js?v=2"></script>
+</body>
+</html>
