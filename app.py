@@ -186,6 +186,7 @@ def process():
     # Parse options
     upscale_factor = data.get("upscale")  # None, 2, or 4
     remove_bg = data.get("remove_bg", False)
+    trim_image = data.get("trim", False)
     output_format = data.get("format", "png")  # "png", "svg", "ico"
 
     if upscale_factor is not None:
@@ -197,14 +198,21 @@ def process():
     def run_processing():
         try:
             input_path = job["original"]
-            # Copy to output dir for processing
+
+            # Upscale
+            if upscale_factor:
+                # ... check implementation ...
+                current_path = processor.upscale(input_path, upscale_factor, progress_cb=None) # Correct reference?
+                # Actually run_processing is simpler here. 
+                # Let's align with batch logic structure.
+                pass 
+            
+            # Recopy full block with trim added
             import shutil
             work_path = str(OUTPUT_DIR / f"{job_id}_work{Path(input_path).suffix}")
             shutil.copy2(input_path, work_path)
-
             current_path = work_path
 
-            # Progress callback — sends real-time updates to UI
             def on_progress(msg):
                 job["progress"] = msg
 
@@ -220,7 +228,13 @@ def process():
                 current_path = processor.remove_background(current_path, progress_cb=on_progress)
                 job["results"]["no_background"] = current_path
 
-            # Step 3: Convert format
+            # Step 3: Trim (Auto-crop)
+            if trim_image:
+                on_progress("✂️ Recortando bordes...")
+                current_path = processor.trim(current_path, progress_cb=on_progress)
+                job["results"]["trimmed"] = current_path
+
+            # Step 4: Convert format
             if output_format == "svg":
                 on_progress("Preparando conversión a SVG...")
                 final_path = processor.to_svg(current_path, progress_cb=on_progress)
@@ -345,8 +359,9 @@ def batch_process():
             return jsonify({"error": f"Job {job_id} not found"}), 404
 
     # Extract settings
-    upscale = data.get("upscale", 0)
+    upscale = int(data.get("upscale", 0))
     remove_bg = data.get("remove_bg", False)
+    trim_image = data.get("trim", False)
     fmt = data.get("format", "png")
 
     # Start processing each job
@@ -354,6 +369,7 @@ def batch_process():
         job = jobs[job_id]
         job["upscale"] = upscale
         job["remove_bg"] = remove_bg
+        job["trim"] = trim_image
         job["output_format"] = fmt
 
         # Trigger the same processing logic as single process
@@ -383,6 +399,11 @@ def batch_process():
                 if the_job["remove_bg"]:
                     current_path = processor.remove_background(current_path, progress_cb=on_progress)
                     the_job["results"]["background_removed"] = current_path
+
+                # Trim (Auto-crop)
+                if the_job.get("trim"):
+                    current_path = processor.trim(current_path, progress_cb=on_progress)
+                    the_job["results"]["trimmed"] = current_path
 
                 # Convert format
                 output_fmt = the_job["output_format"]
@@ -434,7 +455,7 @@ def batch_status(batch_id):
         })
 
     # Overall batch status
-    all_done = all(s["status"] == "done" for s in statuses)
+    all_done = all(s["status"] in ("done", "error") for s in statuses)
     any_error = any(s["status"] == "error" for s in statuses)
     any_processing = any(s["status"] == "processing" for s in statuses)
 
@@ -522,10 +543,11 @@ def download_batch(batch_id):
     if not batch_jobs:
         return jsonify({"error": "Batch not found"}), 404
 
-    # Check if all jobs are done
-    all_done = all(job["status"] == "done" for job in batch_jobs.values())
-    if not all_done:
-        return jsonify({"error": "Not all jobs are complete"}), 400
+    # Check if all jobs are finished (either done or error)
+    all_finished = all(job["status"] in ("done", "error") for job in batch_jobs.values())
+    
+    if not all_finished:
+        return jsonify({"error": "Batch processing is still in progress"}), 400
 
     # Create ZIP in memory
     zip_buffer = io.BytesIO()

@@ -19,7 +19,7 @@ import numpy as np
 import torch
 import torchvision
 from PIL import Image
-from rembg import remove
+from rembg import remove, new_session
 
 logging.basicConfig(level=logging.INFO)
 
@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Max input dimension before auto-resize (upscaling a 2000px image x4 = 8000px)
 MAX_INPUT_DIM = 1500
-# Tile size for Real-ESRGAN (larger = less boundary issues, more memory)
-TILE_SIZE = 1024
+# Tile size for Real-ESRGAN (0 = disable tiling, avoids artifacts but uses more memory)
+TILE_SIZE = 0
 
 
 class ImageProcessor:
@@ -230,13 +230,19 @@ class ImageProcessor:
             if progress_cb:
                 progress_cb(msg)
 
-        update("🎭 Removing background with AI...")
+        update("🎭 Removing background with AI (ISNet model)...")
         start = time.time()
 
         with open(image_path, "rb") as f:
             input_data = f.read()
 
-        output_data = remove(input_data)
+        # Use ISNet model for better general quality
+        session = new_session("isnet-general-use")
+        output_data = remove(
+            input_data, 
+            session=session, 
+            post_process_mask=True
+        )
 
         output_path = self._make_output_path(image_path, "_nobg", ext=".png")
         with open(output_path, "wb") as f:
@@ -324,11 +330,26 @@ class ImageProcessor:
 
         update("🖋️ Converting to SVG...")
         start = time.time()
+        
+        # Optimize input image size for SVG
+        # Vectors don't need 4K pixels. 1024px is plenty for detailed trace.
+        # This massively reduces file size (e.g. 16MB -> 2MB)
+        img = Image.open(image_path)
+        max_dim = 1024
+        if max(img.size) > max_dim:
+            update(f"📉 Optimizing input for SVG ({img.width}x{img.height} → {max_dim}px)...")
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            # Save temporary optimized input
+            temp_input = self._make_output_path(image_path, "_svg_opt", ext=".png")
+            img.save(temp_input)
+            process_path = temp_input
+        else:
+            process_path = image_path
 
         output_path = self._make_output_path(image_path, "", ext=".svg")
 
         vtracer.convert_image_to_svg_py(
-            image_path,
+            process_path,
             output_path,
             colormode="color",
             hierarchical="stacked",
@@ -373,11 +394,49 @@ class ImageProcessor:
         update(f"✅ ICO saved with {len(sizes)} sizes")
         return output_path
 
+    def trim(self, image_path: str, progress_cb=None) -> str:
+        """
+        Trim meaningless borders (transparent or solid color).
+        """
+        def update(msg):
+            logger.info(msg)
+            if progress_cb:
+                progress_cb(msg)
+
+        update("✂️ Trimming empty borders...")
+        img = Image.open(image_path)
+        
+        # getbbox() finds the bounding box of non-zero regions.
+        # For RGBA, it uses the alpha channel.
+        bbox = img.getbbox()
+        
+        if bbox:
+            # Add a small padding (margin)
+            pad = 20
+            left, upper, right, lower = bbox
+            width, height = img.size
+            
+            # Ensure padding doesn't go out of bounds
+            left = max(0, left - pad)
+            upper = max(0, upper - pad)
+            right = min(width, right + pad)
+            lower = min(height, lower + pad)
+            
+            img = img.crop((left, upper, right, lower))
+            
+            output_path = self._make_output_path(image_path, "_trimmed")
+            img.save(output_path)
+            update(f"✅ Trimmed to {img.width}x{img.height}")
+            return output_path
+            
+        return image_path
+
     def process_pipeline(
         self,
         image_path: str,
         upscale_factor: int | None = None,
         remove_bg: bool = False,
+        trim_image: bool = False,
         output_format: str = "png",
         progress_cb=None,
     ) -> dict:
@@ -400,7 +459,13 @@ class ImageProcessor:
             results["no_background"] = current_path
             results["steps"].append("background_removed")
 
-        # Step 3: Convert format
+        # Step 3: Trim (Auto-crop)
+        if trim_image:
+            current_path = self.trim(current_path, progress_cb)
+            results["trimmed"] = current_path
+            results["steps"].append("trimmed")
+
+        # Step 4: Convert format
         if output_format == "svg":
             final_path = self.to_svg(current_path, progress_cb)
             results["svg"] = final_path

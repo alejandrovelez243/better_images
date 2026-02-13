@@ -255,6 +255,7 @@
         // Get batch settings
         const upscale = parseInt(document.querySelector('input[name="batch-upscale"]:checked').value);
         const removeBg = document.getElementById("batch-remove-bg").checked;
+        const trimImage = document.getElementById("batch-trim").checked;
         const format = document.querySelector('input[name="batch-format"]:checked').value;
 
         // Start batch processing
@@ -266,6 +267,7 @@
                     job_ids: uploadedImages.map(img => img.jobId),
                     upscale,
                     remove_bg: removeBg,
+                    trim: trimImage,
                     format
                 })
             });
