@@ -1,6 +1,6 @@
 /**
- * Better Images — Frontend Application
- * Handles file upload, processing options, preview, and downloads.
+ * Better Images — Frontend Application (Batch Processing)
+ * Handles multi-file upload, per-image dimension controls, and batch processing.
  */
 
 (function () {
@@ -10,30 +10,29 @@
     const dropZone = document.getElementById("drop-zone");
     const fileInput = document.getElementById("file-input");
     const uploadSection = document.getElementById("upload-section");
-    const workspace = document.getElementById("workspace");
-    const previewImage = document.getElementById("preview-image");
-    const previewPlaceholder = document.getElementById("preview-placeholder");
-    const tabResult = document.getElementById("tab-result");
-    const btnProcess = document.getElementById("btn-process");
-    const btnDownload = document.getElementById("btn-download");
-    const btnNew = document.getElementById("btn-new");
-    const progressArea = document.getElementById("progress-area");
-    const progressFill = document.getElementById("progress-fill");
-    const progressText = document.getElementById("progress-text");
-    const downloadArea = document.getElementById("download-area");
-    const infoName = document.getElementById("info-name");
-    const infoDimensions = document.getElementById("info-dimensions");
+    const gallerySection = document.getElementById("gallery-section");
+    const imageGallery = document.getElementById("image-gallery");
+    const imageCount = document.getElementById("image-count");
+    const btnClearAll = document.getElementById("btn-clear-all");
+    const btnProcessBatch = document.getElementById("btn-process-batch");
+    const batchProgress = document.getElementById("batch-progress");
+    const batchProgressFill = document.getElementById("batch-progress-fill");
+    const batchProgressText = document.getElementById("batch-progress-text");
+    const batchDownload = document.getElementById("batch-download");
+    const btnDownloadZip = document.getElementById("btn-download-zip");
+    const btnNewBatch = document.getElementById("btn-new-batch");
     const toastContainer = document.getElementById("toast-container");
 
     // --- State ---
-    let currentJob = null;
-    let pollInterval = null;
-    let showingResult = false;
+    let uploadedImages = []; // Array of { jobId, filename, width, height, aspectRatio, lockAspect }
+    let currentBatchId = null;
+    let statusPollInterval = null;
 
     // --- Drag & Drop ---
     dropZone.addEventListener("click", () => fileInput.click());
+
     fileInput.addEventListener("change", (e) => {
-        if (e.target.files.length > 0) uploadFile(e.target.files[0]);
+        if (e.target.files.length > 0) uploadFiles(Array.from(e.target.files));
     });
 
     dropZone.addEventListener("dragover", (e) => {
@@ -49,247 +48,327 @@
         e.preventDefault();
         dropZone.classList.remove("dragover");
         if (e.dataTransfer.files.length > 0) {
-            uploadFile(e.dataTransfer.files[0]);
+            uploadFiles(Array.from(e.dataTransfer.files));
         }
     });
 
-    // --- Upload ---
-    async function uploadFile(file) {
+    // --- Upload Multiple Files ---
+    async function uploadFiles(files) {
         const formData = new FormData();
-        formData.append("file", file);
+        files.forEach(file => formData.append("files", file));
 
         try {
-            const res = await fetch("/api/upload", { method: "POST", body: formData });
+            const res = await fetch("/api/upload-batch", { method: "POST", body: formData });
             const data = await res.json();
 
             if (!res.ok) {
-                showToast(data.error || "Error uploading file", "error");
+                showToast(data.error || "Error uploading files", "error");
                 return;
             }
 
-            currentJob = data;
+            currentBatchId = data.batch_id;
 
-            // Show workspace
+            // Add uploaded jobs to our state
+            data.jobs.forEach(job => {
+                uploadedImages.push({
+                    jobId: job.id,
+                    filename: job.filename,
+                    width: job.width,
+                    height: job.height,
+                    originalWidth: job.width,
+                    originalHeight: job.height,
+                    aspectRatio: job.width / job.height,
+                    lockAspect: true,
+                    status: "uploaded"
+                });
+            });
+
+            // Show gallery
             uploadSection.style.display = "none";
-            workspace.style.display = "block";
+            gallerySection.style.display = "block";
 
-            // Show preview
-            previewImage.src = `/api/preview/${data.id}?type=original`;
-            previewPlaceholder.style.display = "none";
+            renderGallery();
+            showToast(`${data.count} imagen(es) cargada(s)`, "success");
 
-            // Update info
-            infoName.textContent = data.filename;
-            infoDimensions.textContent = `${data.width} × ${data.height}`;
-
-            // Reset state
-            tabResult.style.display = "none";
-            downloadArea.style.display = "none";
-            progressArea.style.display = "none";
-            btnProcess.disabled = false;
-            btnProcess.classList.remove("processing");
-            showingResult = false;
-
-            // Reset tabs
-            document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-            document.querySelector('.tab[data-preview="original"]').classList.add("active");
-
-            showToast(`${data.filename} cargado correctamente`, "success");
-        } catch (err) {
-            showToast("Error de conexión", "error");
-            console.error(err);
+        } catch (error) {
+            showToast("Error uploading files", "error");
+            console.error(error);
         }
     }
 
-    // --- Process ---
-    btnProcess.addEventListener("click", async () => {
-        if (!currentJob) return;
+    // --- Render Gallery ---
+    function renderGallery() {
+        imageCount.textContent = uploadedImages.length;
+        imageGallery.innerHTML = "";
 
-        const upscale = document.querySelector('input[name="upscale"]:checked').value;
-        const removeBg = document.getElementById("remove-bg").checked;
-        const format = document.querySelector('input[name="format"]:checked').value;
+        uploadedImages.forEach((img, index) => {
+            const card = createImageCard(img, index);
+            imageGallery.appendChild(card);
+        });
+    }
 
-        // At least one operation must be selected
-        if (upscale === "0" && !removeBg && format === "png") {
-            showToast("Selecciona al menos una operación", "error");
-            return;
+    // --- Create Image Card ---
+    function createImageCard(img, index) {
+        const card = document.createElement("div");
+        card.className = "image-card";
+        card.dataset.index = index;
+
+        card.innerHTML = `
+            <div class="image-card__preview">
+                <img src="/api/preview/${img.jobId}?type=original" alt="${img.filename}">
+                <button class="image-card__remove" data-index="${index}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="image-card__info">
+                <div class="image-card__name" title="${img.filename}">${img.filename}</div>
+                <div class="image-card__meta">
+                    <span class="meta-tag">Original: ${img.originalWidth}×${img.originalHeight}</span>
+                </div>
+                <div class="dimension-controls">
+                    <div class="dimension-input">
+                        <label>Ancho</label>
+                        <input type="number" class="width-input" data-index="${index}" value="${img.width}" min="1">
+                    </div>
+                    <button class="lock-aspect ${img.lockAspect ? 'locked' : ''}" data-index="${index}">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            ${img.lockAspect
+                ? '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>'
+                : '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 9.9-1"></path>'
+            }
+                        </svg>
+                    </button>
+                    <div class="dimension-input">
+                        <label>Alto</label>
+                        <input type="number" class="height-input" data-index="${index}" value="${img.height}" min="1">
+                    </div>
+                </div>
+                <div class="image-card__status" style="display:${img.status === 'uploaded' ? 'none' : 'block'}">
+                    ${getStatusText(img.status)}
+                </div>
+            </div>
+        `;
+
+        // Event listeners for this card
+        const removeBtn = card.querySelector(".image-card__remove");
+        const lockBtn = card.querySelector(".lock-aspect");
+        const widthInput = card.querySelector(".width-input");
+        const heightInput = card.querySelector(".height-input");
+
+        removeBtn.addEventListener("click", () => removeImage(index));
+        lockBtn.addEventListener("click", () => toggleLockAspect(index));
+        widthInput.addEventListener("input", (e) => onDimensionChange(index, "width", parseInt(e.target.value)));
+        heightInput.addEventListener("input", (e) => onDimensionChange(index, "height", parseInt(e.target.value)));
+
+        return card;
+    }
+
+    // --- Dimension Controls ---
+    function toggleLockAspect(index) {
+        uploadedImages[index].lockAspect = !uploadedImages[index].lockAspect;
+        renderGallery();
+    }
+
+    function onDimensionChange(index, dimension, value) {
+        if (isNaN(value) || value < 1) return;
+
+        const img = uploadedImages[index];
+
+        if (dimension === "width") {
+            img.width = value;
+            if (img.lockAspect) {
+                img.height = Math.round(value / img.aspectRatio);
+            }
+        } else {
+            img.height = value;
+            if (img.lockAspect) {
+                img.width = Math.round(value * img.aspectRatio);
+            }
         }
 
-        btnProcess.disabled = true;
-        btnProcess.classList.add("processing");
-        btnProcess.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
-            Procesando...
-        `;
-        progressArea.style.display = "block";
-        downloadArea.style.display = "none";
+        // Update the inputs without re-rendering entire gallery
+        const card = imageGallery.querySelector(`[data-index="${index}"]`);
+        if (card) {
+            card.querySelector(".width-input").value = img.width;
+            card.querySelector(".height-input").value = img.height;
+        }
+    }
 
-        try {
-            const res = await fetch("/api/process", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    id: currentJob.id,
-                    upscale: upscale === "0" ? null : parseInt(upscale),
-                    remove_bg: removeBg,
-                    format: format,
-                }),
-            });
+    // --- Remove Image ---
+    function removeImage(index) {
+        uploadedImages.splice(index, 1);
+        if (uploadedImages.length === 0) {
+            resetToUpload();
+        } else {
+            renderGallery();
+        }
+    }
 
-            const data = await res.json();
-            if (!res.ok) {
-                showToast(data.error || "Error al procesar", "error");
-                resetProcessButton();
-                return;
-            }
-
-            // Start polling
-            startPolling();
-        } catch (err) {
-            showToast("Error de conexión", "error");
-            resetProcessButton();
-            console.error(err);
+    // --- Clear All ---
+    btnClearAll.addEventListener("click", () => {
+        if (confirm("¿Eliminar todas las imágenes?")) {
+            resetToUpload();
         }
     });
 
-    function startPolling() {
-        if (pollInterval) clearInterval(pollInterval);
+    function resetToUpload() {
+        uploadedImages = [];
+        currentBatchId = null;
+        gallerySection.style.display = "none";
+        uploadSection.style.display = "block";
+        fileInput.value = "";
+    }
 
-        // Animate progress bar
-        let progressValue = 0;
-        progressFill.style.width = "5%";
+    // --- Batch Processing ---
+    btnProcessBatch.addEventListener("click", async () => {
+        btnProcessBatch.disabled = true;
+        batchProgress.style.display = "block";
+        batchDownload.style.display = "none";
 
-        pollInterval = setInterval(async () => {
-            try {
-                const res = await fetch(`/api/status/${currentJob.id}`);
-
-                // Handle stale job (server restarted)
-                if (!res.ok) {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-                    progressArea.style.display = "none";
-                    resetProcessButton();
-                    showToast("Sesión expirada. Sube la imagen de nuevo.", "error");
-                    return;
+        // First, resize images if dimensions changed
+        for (const img of uploadedImages) {
+            if (img.width !== img.originalWidth || img.height !== img.originalHeight) {
+                try {
+                    await fetch(`/api/resize/${img.jobId}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            width: img.width,
+                            height: img.height,
+                            maintain_aspect: img.lockAspect
+                        })
+                    });
+                    img.status = "resizing";
+                    updateCardStatus(img.jobId, "Redimensionando...");
+                } catch (error) {
+                    console.error(`Error resizing ${img.jobId}:`, error);
                 }
+            }
+        }
 
+        // Wait a bit for resizes to complete
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Get batch settings
+        const upscale = parseInt(document.querySelector('input[name="batch-upscale"]:checked').value);
+        const removeBg = document.getElementById("batch-remove-bg").checked;
+        const format = document.querySelector('input[name="batch-format"]:checked').value;
+
+        // Start batch processing
+        try {
+            const res = await fetch("/api/batch-process", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    job_ids: uploadedImages.map(img => img.jobId),
+                    upscale,
+                    remove_bg: removeBg,
+                    format
+                })
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                showToast(data.error || "Error processing batch", "error");
+                btnProcessBatch.disabled = false;
+                return;
+            }
+
+            // Start polling for status
+            startStatusPolling();
+
+        } catch (error) {
+            showToast("Error al procesar", "error");
+            btnProcessBatch.disabled = false;
+            batchProgress.style.display = "none";
+        }
+    });
+
+    // --- Status Polling ---
+    function startStatusPolling() {
+        if (statusPollInterval) clearInterval(statusPollInterval);
+
+        statusPollInterval = setInterval(async () => {
+            try {
+                const res = await fetch(`/api/batch-status/${currentBatchId}`);
                 const data = await res.json();
 
-                progressText.textContent = data.progress || "Procesando...";
+                // Update each image status
+                data.jobs.forEach(job => {
+                    const img = uploadedImages.find(i => i.jobId === job.id);
+                    if (img) {
+                        img.status = job.status;
+                        img.progress = job.progress;
+                        updateCardStatus(job.id, job.progress || job.status);
+                    }
+                });
 
-                // Animate progress bar (indeterminate style)
-                if (data.status === "processing") {
-                    progressValue = Math.min(progressValue + 2, 90);
-                    progressFill.style.width = progressValue + "%";
+                // Update overall progress
+                const doneCount = data.jobs.filter(j => j.status === "done").length;
+                const progress = (doneCount / data.jobs.length) * 100;
+                batchProgressFill.style.width = `${progress}%`;
+                batchProgressText.textContent = `${doneCount} de ${data.jobs.length} completadas`;
+
+                // Check if all done
+                if (data.all_done) {
+                    clearInterval(statusPollInterval);
+                    batchProgress.style.display = "none";
+                    batchDownload.style.display = "block";
+                    btnProcessBatch.disabled = false;
+                    showToast("¡Todas las imágenes procesadas!", "success");
                 }
 
-                if (data.status === "done") {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-
-                    progressFill.style.width = "100%";
-
-                    // Small delay so user sees 100%
-                    setTimeout(() => {
-                        // Show result
-                        progressArea.style.display = "none";
-                        downloadArea.style.display = "flex";
-
-                        // Update preview to result
-                        const format = document.querySelector('input[name="format"]:checked').value;
-                        if (format === "svg") {
-                            previewImage.src = `/api/preview/${currentJob.id}?type=svg`;
-                        } else if (format === "ico") {
-                            previewImage.src = `/api/preview/${currentJob.id}?type=ico`;
-                        } else if (data.results.no_background) {
-                            previewImage.src = `/api/preview/${currentJob.id}?type=no_background`;
-                        } else if (data.results.upscaled) {
-                            previewImage.src = `/api/preview/${currentJob.id}?type=upscaled`;
-                        } else {
-                            previewImage.src = `/api/preview/${currentJob.id}?type=final`;
-                        }
-
-                        // Show result tab
-                        tabResult.style.display = "inline-block";
-                        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-                        tabResult.classList.add("active");
-                        showingResult = true;
-
-                        resetProcessButton();
-                        showToast("¡Imagen procesada exitosamente!", "success");
-                    }, 400);
-
-                } else if (data.status === "error") {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-                    progressArea.style.display = "none";
-                    resetProcessButton();
-                    showToast(data.error || "Error durante el procesamiento", "error");
+                // Check for errors
+                if (data.any_error) {
+                    showToast("Algunas imágenes tuvieron errores", "error");
                 }
-            } catch (err) {
-                console.error("Polling error:", err);
+
+            } catch (error) {
+                console.error("Error polling status:", error);
             }
         }, 1000);
     }
 
-    function resetProcessButton() {
-        btnProcess.disabled = false;
-        btnProcess.classList.remove("processing");
-        btnProcess.innerHTML = `
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            Procesar Imagen
-        `;
+    function updateCardStatus(jobId, statusText) {
+        const img = uploadedImages.find(i => i.jobId === jobId);
+        if (!img) return;
+
+        const index = uploadedImages.indexOf(img);
+        const card = imageGallery.querySelector(`[data-index="${index}"]`);
+        if (card) {
+            const statusEl = card.querySelector(".image-card__status");
+            statusEl.style.display = "block";
+            statusEl.textContent = statusText;
+            statusEl.className = `image-card__status image-card__status--${img.status}`;
+        }
     }
 
-    // --- Preview Tabs ---
-    document.querySelectorAll(".tab").forEach((tab) => {
-        tab.addEventListener("click", () => {
-            if (!currentJob) return;
+    function getStatusText(status) {
+        const map = {
+            "uploaded": "",
+            "processing": "Procesando...",
+            "done": "✓ Completado",
+            "error": "✗ Error"
+        };
+        return map[status] || status;
+    }
 
-            document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-            tab.classList.add("active");
-
-            const type = tab.dataset.preview;
-            if (type === "original") {
-                previewImage.src = `/api/preview/${currentJob.id}?type=original`;
-                showingResult = false;
-            } else {
-                // Show the best result
-                const format = document.querySelector('input[name="format"]:checked').value;
-                if (format === "svg") {
-                    previewImage.src = `/api/preview/${currentJob.id}?type=svg`;
-                } else {
-                    previewImage.src = `/api/preview/${currentJob.id}?type=final`;
-                }
-                showingResult = true;
-            }
-        });
+    // --- Download ZIP ---
+    btnDownloadZip.addEventListener("click", () => {
+        window.location.href = `/api/download-batch/${currentBatchId}`;
     });
 
-    // --- Download ---
-    btnDownload.addEventListener("click", () => {
-        if (!currentJob) return;
-        // Server redirects to /api/download/UUID/filename.ext
-        window.location.href = `/api/download/${currentJob.id}?type=final`;
+    // --- New Batch ---
+    btnNewBatch.addEventListener("click", () => {
+        if (statusPollInterval) clearInterval(statusPollInterval);
+        resetToUpload();
     });
 
-    // --- New Image ---
-    btnNew.addEventListener("click", () => {
-        currentJob = null;
-        if (pollInterval) clearInterval(pollInterval);
-
-        workspace.style.display = "none";
-        uploadSection.style.display = "flex";
-        fileInput.value = "";
-
-        // Reset options
-        document.querySelector('input[name="upscale"][value="0"]').checked = true;
-        document.getElementById("remove-bg").checked = false;
-        document.querySelector('input[name="format"][value="png"]').checked = true;
-    });
-
-    // --- Toast ---
+    // --- Toast Notifications ---
     function showToast(message, type = "info") {
         const toast = document.createElement("div");
         toast.className = `toast toast--${type}`;
@@ -297,10 +376,8 @@
         toastContainer.appendChild(toast);
 
         setTimeout(() => {
-            toast.style.opacity = "0";
-            toast.style.transform = "translateX(40px)";
-            toast.style.transition = "all 0.3s ease";
-            setTimeout(() => toast.remove(), 300);
+            toast.remove();
         }, 4000);
     }
+
 })();

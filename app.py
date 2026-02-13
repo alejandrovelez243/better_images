@@ -3,11 +3,17 @@ Better Images — Flask Web App
 Local image processing: upscale, remove background, convert to SVG/ICO.
 """
 
+import patch_torchvision  # MUST BE FIRST
 import os
 import uuid
 import logging
 import threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+
+# Limit concurrency to avoid OOM / SegFaults on MPS
+# 2 workers is a safe balance for most local machines
+executor = ThreadPoolExecutor(max_workers=2)
 
 # Set model cache dirs BEFORE importing rembg (via processor)
 os.environ.setdefault("U2NET_HOME", str(Path(__file__).parent / "models"))
@@ -99,6 +105,66 @@ def upload():
         "filename": file.filename,
         "width": width,
         "height": height,
+    })
+
+
+@app.route("/api/upload-batch", methods=["POST"])
+def upload_batch():
+    """Upload multiple images and return a batch ID with job IDs."""
+    if "files" not in request.files:
+        return jsonify({"error": "No files provided"}), 400
+
+    files = request.files.getlist("files")
+    if not files:
+        return jsonify({"error": "No files selected"}), 400
+
+    batch_id = str(uuid.uuid4())
+    uploaded_jobs = []
+
+    for file in files:
+        if not file.filename or not allowed_file(file.filename):
+            logger.warning(f"Skipping invalid file: {file.filename}")
+            continue
+
+        job_id = str(uuid.uuid4())
+        ext = Path(file.filename).suffix.lower()
+        filename = f"{job_id}{ext}"
+        filepath = UPLOAD_DIR / filename
+        file.save(filepath)
+
+        # Get image dimensions
+        from PIL import Image
+        with Image.open(filepath) as img:
+            width, height = img.size
+
+        jobs[job_id] = {
+            "id": job_id,
+            "batch_id": batch_id,
+            "status": "uploaded",
+            "original": str(filepath),
+            "original_name": file.filename,
+            "width": width,
+            "height": height,
+            "results": {},
+            "error": None,
+        }
+
+        uploaded_jobs.append({
+            "id": job_id,
+            "filename": file.filename,
+            "width": width,
+            "height": height,
+        })
+
+        logger.info(f"Batch {batch_id}: Uploaded {file.filename} as {job_id} ({width}x{height})")
+
+    if not uploaded_jobs:
+        return jsonify({"error": "No valid files uploaded"}), 400
+
+    return jsonify({
+        "batch_id": batch_id,
+        "jobs": uploaded_jobs,
+        "count": len(uploaded_jobs),
     })
 
 
@@ -207,6 +273,181 @@ def status(job_id):
     })
 
 
+@app.route("/api/resize/<job_id>", methods=["POST"])
+def resize_image(job_id):
+    """Resize an uploaded image to custom dimensions."""
+    if job_id not in jobs:
+        return jsonify({"error": "Job not found"}), 404
+
+    data = request.get_json() or {}
+    width = data.get("width")
+    height = data.get("height")
+    maintain_aspect = data.get("maintain_aspect", True)
+
+    if not width and not height:
+        return jsonify({"error": "Must specify width or height"}), 400
+
+    job = jobs[job_id]
+    if job["status"] == "processing":
+        return jsonify({"error": "Job is already processing"}), 400
+
+    def run_resize():
+        try:
+            job["status"] = "processing"
+            job["progress"] = "Resizing..."
+            
+            current_path = job["original"]
+            resized_path = processor.resize(
+                current_path,
+                width=width,
+                height=height,
+                maintain_aspect=maintain_aspect,
+                progress_cb=lambda msg: job.update({"progress": msg})
+            )
+            
+            # Update job with new path and dimensions
+            from PIL import Image
+            with Image.open(resized_path) as img:
+                new_width, new_height = img.size
+            
+            job["original"] = resized_path
+            job["width"] = new_width
+            job["height"] = new_height
+            job["status"] = "uploaded"
+            job["progress"] = "Resized"
+            logger.info(f"Resized {job_id} to {new_width}x{new_height}")
+
+        except Exception as e:
+            job["status"] = "error"
+            job["error"] = str(e)
+            logger.error(f"Resize failed for {job_id}: {e}", exc_info=True)
+
+    thread = threading.Thread(target=run_resize, daemon=True)
+    thread.start()
+
+    return jsonify({"id": job_id, "status": "processing"})
+
+
+@app.route("/api/batch-process", methods=["POST"])
+def batch_process():
+    """Process multiple images with the same settings."""
+    data = request.get_json()
+    if not data or "job_ids" not in data:
+        return jsonify({"error": "Missing job_ids"}), 400
+
+    job_ids = data["job_ids"]
+    if not isinstance(job_ids, list) or not job_ids:
+        return jsonify({"error": "job_ids must be a non-empty list"}), 400
+
+    # Validate all jobs exist
+    for job_id in job_ids:
+        if job_id not in jobs:
+            return jsonify({"error": f"Job {job_id} not found"}), 404
+
+    # Extract settings
+    upscale = data.get("upscale", 0)
+    remove_bg = data.get("remove_bg", False)
+    fmt = data.get("format", "png")
+
+    # Start processing each job
+    for job_id in job_ids:
+        job = jobs[job_id]
+        job["upscale"] = upscale
+        job["remove_bg"] = remove_bg
+        job["output_format"] = fmt
+
+        # Trigger the same processing logic as single process
+        def run_batch_item(jid):
+            the_job = jobs[jid]
+            if the_job["status"] != "uploaded":
+                return
+
+            the_job["status"] = "processing"
+            the_job["progress"] = "Starting..."
+            
+            def on_progress(msg):
+                the_job["progress"] = msg
+
+            try:
+                current_path = the_job["original"]
+
+                # Upscale
+                if the_job["upscale"] > 0:
+                    scale_factor = the_job["upscale"]
+                    the_job["progress"] = "📐 Checking image size..."
+                    logger.info("📐 Checking image size...")
+                    current_path = processor.upscale(current_path, scale_factor, progress_cb=on_progress)
+                    the_job["results"]["upscaled"] = current_path
+
+                # Remove background
+                if the_job["remove_bg"]:
+                    current_path = processor.remove_background(current_path, progress_cb=on_progress)
+                    the_job["results"]["background_removed"] = current_path
+
+                # Convert format
+                output_fmt = the_job["output_format"]
+                if output_fmt == "svg":
+                    current_path = processor.to_svg(current_path, progress_cb=on_progress)
+                    the_job["results"]["svg"] = current_path
+                elif output_fmt == "ico":
+                    current_path = processor.to_ico(current_path, progress_cb=on_progress)
+                    the_job["results"]["ico"] = current_path
+
+                final_path = current_path
+                the_job["results"]["final"] = final_path
+                the_job["status"] = "done"
+                the_job["progress"] = "¡Completado!"
+                logger.info(f"Job {jid} complete: {final_path}")
+
+            except Exception as e:
+                the_job["status"] = "error"
+                the_job["error"] = str(e)
+                the_job["progress"] = f"Error: {e}"
+                logger.error(f"Job {jid} failed: {e}", exc_info=True)
+
+        # Use global executor to limit concurrency
+        executor.submit(run_batch_item, job_id)
+
+    return jsonify({
+        "message": f"Batch processing started for {len(job_ids)} images",
+        "job_ids": job_ids
+    })
+
+
+@app.route("/api/batch-status/<batch_id>")
+def batch_status(batch_id):
+    """Get status of all jobs in a batch."""
+    batch_jobs = {jid: job for jid, job in jobs.items() if job.get("batch_id") == batch_id}
+    
+    if not batch_jobs:
+        return jsonify({"error": "Batch not found"}), 404
+
+    statuses = []
+    for job_id, job in batch_jobs.items():
+        statuses.append({
+            "id": job_id,
+            "filename": job.get("original_name", ""),
+            "status": job["status"],
+            "progress": job.get("progress", ""),
+            "error": job.get("error"),
+            "has_results": bool(job.get("results")),
+        })
+
+    # Overall batch status
+    all_done = all(s["status"] == "done" for s in statuses)
+    any_error = any(s["status"] == "error" for s in statuses)
+    any_processing = any(s["status"] == "processing" for s in statuses)
+
+    return jsonify({
+        "batch_id": batch_id,
+        "jobs": statuses,
+        "count": len(statuses),
+        "all_done": all_done,
+        "any_error": any_error,
+        "any_processing": any_processing,
+    })
+
+
 @app.route("/api/download/<job_id>/<filename>")
 def download_with_name(job_id, filename):
     """Download the processed file (filename in URL for browser compatibility)."""
@@ -268,6 +509,48 @@ def preview(job_id):
         return send_file(filepath, mimetype="image/x-icon")
     else:
         return send_file(filepath)
+
+
+@app.route("/api/download-batch/<batch_id>")
+def download_batch(batch_id):
+    """Download all processed images in a batch as a ZIP file."""
+    import zipfile
+    import io
+
+    batch_jobs = {jid: job for jid, job in jobs.items() if job.get("batch_id") == batch_id}
+    
+    if not batch_jobs:
+        return jsonify({"error": "Batch not found"}), 404
+
+    # Check if all jobs are done
+    all_done = all(job["status"] == "done" for job in batch_jobs.values())
+    if not all_done:
+        return jsonify({"error": "Not all jobs are complete"}), 400
+
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        for job_id, job in batch_jobs.items():
+            final_path = job["results"].get("final")
+            if final_path and os.path.exists(final_path):
+                # Generate nice filename
+                original_name = Path(job["original_name"]).stem
+                final_ext = Path(final_path).suffix
+                filename = f"{original_name}_processed{final_ext}"
+                
+                # Add to ZIP
+                zip_file.write(final_path, filename)
+                logger.info(f"Added {filename} to batch ZIP")
+
+    zip_buffer.seek(0)
+    
+    return send_file(
+        zip_buffer,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'batch_{batch_id}.zip'
+    )
 
 
 def _make_download_name(job: dict, result_type: str) -> str:

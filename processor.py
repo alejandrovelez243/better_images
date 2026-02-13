@@ -9,14 +9,19 @@ Key improvements for macOS:
 - MPS (Apple Metal GPU) detection for acceleration
 """
 
+import patch_torchvision  # MUST BE FIRST
 import os
 import time
 import logging
 from pathlib import Path
 
 import numpy as np
+import torch
+import torchvision
 from PIL import Image
 from rembg import remove
+
+logging.basicConfig(level=logging.INFO)
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +103,7 @@ class ImageProcessor:
                 model=model,
                 tile=TILE_SIZE,
                 tile_pad=10,
-                pre_pad=0,
+                pre_pad=10,  # Pad input to avoid dimension mismatch
                 half=use_half,
                 device=self._device,
             )
@@ -239,6 +244,73 @@ class ImageProcessor:
 
         elapsed = time.time() - start
         update(f"✅ Background removed in {elapsed:.1f}s")
+        return output_path
+
+    def resize(
+        self,
+        image_path: str,
+        width: int | None = None,
+        height: int | None = None,
+        maintain_aspect: bool = True,
+        progress_cb=None,
+    ) -> str:
+        """
+        Resize image to specified dimensions.
+        
+        Args:
+            image_path: Path to input image
+            width: Target width (None to auto-calculate from height)
+            height: Target height (None to auto-calculate from width)
+            maintain_aspect: If True and only one dimension given, calculate the other
+            progress_cb: Optional progress callback
+        
+        Returns:
+            Path to resized image
+        """
+        from PIL import Image
+
+        def update(msg):
+            logger.info(msg)
+            if progress_cb:
+                progress_cb(msg)
+
+        update(f"📐 Resizing image...")
+        start = time.time()
+
+        img = Image.open(image_path)
+        orig_w, orig_h = img.size
+
+        # Calculate target dimensions
+        if width is None and height is None:
+            raise ValueError("Must specify at least width or height")
+
+        if maintain_aspect:
+            if width and not height:
+                # Calculate height from width
+                aspect = orig_h / orig_w
+                height = int(width * aspect)
+            elif height and not width:
+                # Calculate width from height
+                aspect = orig_w / orig_h
+                width = int(height * aspect)
+        else:
+            # Use original dimension if not specified
+            width = width or orig_w
+            height = height or orig_h
+
+        update(f"📐 Resizing {orig_w}×{orig_h} → {width}×{height}...")
+
+        # Resize with high-quality Lanczos resampling
+        resized = img.resize((width, height), Image.Resampling.LANCZOS)
+
+        # Save
+        output_path = self._make_output_path(
+            image_path, f"_resized_{width}x{height}", ext=Path(image_path).suffix
+        )
+        resized.save(output_path)
+
+        elapsed = time.time() - start
+        update(f"✅ Resized in {elapsed:.1f}s → {output_path}")
         return output_path
 
     def to_svg(self, image_path: str, progress_cb=None) -> str:

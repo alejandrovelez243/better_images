@@ -39,11 +39,122 @@
                             <line x1="12" y1="3" x2="12" y2="15"/>
                         </svg>
                     </div>
-                    <h2>Arrastra tu imagen aquí</h2>
-                    <p>o haz clic para seleccionar</p>
-                    <span class="drop-zone__formats">PNG • JPG • WEBP • BMP • TIFF — Máx 50MB</span>
+                    <h2>Arrastra tus imágenes aquí</h2>
+                    <p>o haz clic para seleccionar (múltiples archivos)</p>
+                    <span class="drop-zone__formats">PNG • JPG • WEBP • BMP • TIFF — Máx 50MB cada una</span>
                 </div>
-                <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" hidden>
+                <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp,image/bmp,image/tiff" multiple hidden>
+            </div>
+        </section>
+
+        <!-- Image Gallery (for batch uploads) -->
+        <section id="gallery-section" class="gallery-section" style="display:none;">
+            <div class="gallery-header">
+                <h2>Imágenes Cargadas (<span id="image-count">0</span>)</h2>
+                <button id="btn-clear-all" class="btn btn--ghost btn--sm">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
+                    Eliminar Todas
+                </button>
+            </div>
+            
+            <div id="image-gallery" class="image-gallery">
+                <!-- Image cards will be inserted here by JavaScript -->
+            </div>
+
+            <!-- Batch Processing Controls -->
+            <div class="batch-controls">
+                <h3>Opciones de Procesamiento (aplican a todas las imágenes)</h3>
+                
+                <div class="batch-controls__grid">
+                    <div class="options-card">
+                        <h4>Escalado AI</h4>
+                        <div class="scale-options">
+                            <label class="scale-option">
+                                <input type="radio" name="batch-upscale" value="0" checked>
+                                <span class="scale-option__btn">Sin escalar</span>
+                            </label>
+                            <label class="scale-option">
+                                <input type="radio" name="batch-upscale" value="2">
+                                <span class="scale-option__btn">×2</span>
+                            </label>
+                            <label class="scale-option">
+                                <input type="radio" name="batch-upscale" value="4">
+                                <span class="scale-option__btn">×4</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="options-card">
+                        <h4>Quitar Fondo</h4>
+                        <label class="toggle">
+                            <input type="checkbox" id="batch-remove-bg">
+                            <span class="toggle__slider"></span>
+                            <span class="toggle__label">Activar</span>
+                        </label>
+                    </div>
+
+                    <div class="options-card">
+                        <h4>Formato de Salida</h4>
+                        <div class="format-options">
+                            <label class="format-option">
+                                <input type="radio" name="batch-format" value="png" checked>
+                                <span class="format-option__btn">
+                                    <strong>PNG</strong>
+                                    <small>Calidad máxima</small>
+                                </span>
+                            </label>
+                            <label class="format-option">
+                                <input type="radio" name="batch-format" value="svg">
+                                <span class="format-option__btn">
+                                    <strong>SVG</strong>
+                                    <small>Vectorizado</small>
+                                </span>
+                            </label>
+                            <label class="format-option">
+                                <input type="radio" name="batch-format" value="ico">
+                                <span class="format-option__btn">
+                                    <strong>ICO</strong>
+                                    <small>Favicon/Icono</small>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="btn-process-batch" class="btn btn--primary btn--large">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    Procesar Todas las Imágenes
+                </button>
+
+                <div id="batch-progress" class="batch-progress" style="display:none;">
+                    <div class="progress-bar">
+                        <div class="progress-bar__fill" id="batch-progress-fill"></div>
+                    </div>
+                    <p id="batch-progress-text" class="progress-text">Procesando...</p>
+                </div>
+
+                <div id="batch-download" class="download-area" style="display:none;">
+                    <button id="btn-download-zip" class="btn btn--success btn--large">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Descargar Todas (ZIP)
+                    </button>
+                    <button id="btn-new-batch" class="btn btn--ghost">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="1 4 1 10 7 10"></polyline>
+                            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+                        </svg>
+                        Nuevo Lote
+                    </button>
+                </div>
             </div>
         </section>
 
@@ -196,6 +307,6 @@
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>
 
-    <script src="/js/app.js?v=2"></script>
+    <script src="/js/app.js?v=3"></script>
 </body>
 </html>
