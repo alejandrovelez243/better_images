@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Max input dimension before auto-resize (upscaling a 2000px image x4 = 8000px)
 MAX_INPUT_DIM = 1500
-# Tile size for Real-ESRGAN (smaller = less memory, slightly slower)
-TILE_SIZE = 256
+# Tile size for Real-ESRGAN (larger = less boundary issues, more memory)
+TILE_SIZE = 1024
 
 
 class ImageProcessor:
@@ -103,7 +103,7 @@ class ImageProcessor:
                 model=model,
                 tile=TILE_SIZE,
                 tile_pad=10,
-                pre_pad=10,  # Pad input to avoid dimension mismatch
+                pre_pad=0,
                 half=use_half,
                 device=self._device,
             )
